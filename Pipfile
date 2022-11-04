@@ -1,0 +1,19 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+boto3 = "*"
+click = "*"
+
+[dev-packages]
+pylint = "*"
+flake8 = "*"
+pipenv-setup = "*"
+black = "*"
+isort = "*"
+
+[requires]
+python_version = "3.10"
+python_full_version = "3.10.5"
