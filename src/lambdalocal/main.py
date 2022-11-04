@@ -100,11 +100,10 @@ def deploy(name: str, region: str, handler: str, runtime: str, file: str):
             Role=DEFAULT_LAMBDA_ROLE,
         )
     else:
-        result = lambda_client.client.update_function_code(
+        lambda_client.client.update_function_code(
             FunctionName=name,
             ZipFile=bytes_content,
         )
-        print(result)
 
 
 @cli.command(
