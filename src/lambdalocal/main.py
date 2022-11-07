@@ -97,6 +97,11 @@ def deploy(name: str, region: str, handler: str, runtime: str, file: str):
             Code={"ZipFile": bytes_content},
             PackageType="Zip",
             Handler=handler,
+            Environment={
+                "Variables": {
+                    "AWS_ENDPOINT_URL": "http://localhost:4566",
+                }
+            },
             Role=DEFAULT_LAMBDA_ROLE,
         )
     else:
