@@ -129,20 +129,20 @@ def apigw(function_name: str, region: str):
     resource = apigw_client.rest_api_resource(
         rest_api_id,
         parent_resource.get("id"),
-        "/{somethingId}",
-        "{somethingId}",
+        "/{proxy+}",
+        "{proxy+}",
     )
     apigw_client.client.put_method(
         restApiId=rest_api_id,
         resourceId=resource.get("id"),
-        httpMethod="GET",
-        requestParameters={"method.request.path.somethingId": True},
+        httpMethod="ANY",
+        requestParameters={},
         authorizationType="NONE",
     )
     apigw_client.client.put_integration(
         restApiId=rest_api_id,
         resourceId=resource.get("id"),
-        httpMethod="GET",
+        httpMethod="ANY",
         type="AWS_PROXY",
         integrationHttpMethod="POST",
         uri=f"arn:aws:apigateway:{region}:lambda:path/2015-03-31/functions/{lambda_arn}/invocations",
