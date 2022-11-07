@@ -8,6 +8,7 @@ setup(
     install_requires=[
         "click",
         "boto3",
+        "pyyaml",
     ],
     entry_points={
         "console_scripts": [

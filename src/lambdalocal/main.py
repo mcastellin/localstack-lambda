@@ -1,9 +1,37 @@
-import click
+import sys
+import typing
 
 import boto3
+import click
+import yaml
 
 DEFAULT_ENCODING = "UTF-8"
 DEFAULT_LAMBDA_ROLE = "arn:aws:iam::000000000000:role/lambda-role"
+
+
+class LambdaTemplateResource(typing.TypedDict):
+    Name: str
+    Handler: str
+    Runtime: str
+    Environment: typing.Dict[str, str]
+
+
+class LambdaTemplateConfig(dict):
+    @classmethod
+    def load(cls, template_file: str):
+        config: LambdaTemplateResource = {}
+        with open(template_file, "r", encoding="utf-8") as lambda_config:
+            try:
+                data = yaml.safe_load(lambda_config)
+                resources = data.get("Resources")
+                for key in resources.keys():
+                    config = resources.get(key)
+                    break
+            except yaml.YAMLError as err:
+                print("Failed to parse function configuration", err)
+                sys.exit(1)
+
+        return cls(**config)
 
 
 class LambdaClient:
@@ -75,38 +103,36 @@ def cli():
     help=("Deploy lambda function zip to localstack"),
 )
 @click.option("--region", required=True, help="The AWS region")
-@click.option("--name", required=True, help="The name of the lambda function")
 @click.option(
-    "--handler", required=True, help="The name of the lambda function handler"
-)
-@click.option(
-    "--runtime", required=False, default="python3.9", help="The lambda runtime"
+    "--template",
+    "-t",
+    required=True,
+    type=click.Path(exists=True),
+    help="The path of the lambda template",
 )
 @click.argument("file", required=True, type=click.Path(exists=True))
-def deploy(name: str, region: str, handler: str, runtime: str, file: str):
+def deploy(region: str, template: str, file: str):
+
+    config = LambdaTemplateConfig.load(template)
 
     with open(file, "rb") as file_data:
         bytes_content = file_data.read()
 
     lambda_client = LambdaClient(region)
 
-    if not lambda_client.function_exists(name):
+    if not lambda_client.function_exists(config["Name"]):
         lambda_client.client.create_function(
-            FunctionName=name,
-            Runtime=runtime,
+            FunctionName=config["Name"],
+            Runtime=config["Runtime"],
             Code={"ZipFile": bytes_content},
             PackageType="Zip",
-            Handler=handler,
-            Environment={
-                "Variables": {
-                    "AWS_ENDPOINT_URL": "http://localhost:4566",
-                }
-            },
+            Handler=config["Handler"],
+            Environment={"Variables": config["Environment"]},
             Role=DEFAULT_LAMBDA_ROLE,
         )
     else:
         lambda_client.client.update_function_code(
-            FunctionName=name,
+            FunctionName=config["Name"],
             ZipFile=bytes_content,
         )
 
@@ -116,17 +142,25 @@ def deploy(name: str, region: str, handler: str, runtime: str, file: str):
     help=("Deploy lambda apigw"),
 )
 @click.option("--region", required=True, help="The AWS region")
-@click.option("--function-name", required=True, help="The name of the lambda function")
-def apigw(function_name: str, region: str):
+@click.option(
+    "--template",
+    "-t",
+    required=True,
+    type=click.Path(exists=True),
+    help="The path of the lambda template",
+)
+def apigw(template: str, region: str):
+    config = LambdaTemplateConfig.load(template)
+
     lambda_client = LambdaClient(region)
     apigw_client = ApiGatewayClient(region)
 
-    response = lambda_client.client.get_function(FunctionName=function_name)
+    response = lambda_client.client.get_function(FunctionName=config["Name"])
     lambda_arn = response.get("Configuration").get("FunctionArn")
 
-    rest_api = apigw_client.get_rest_api(function_name)
+    rest_api = apigw_client.get_rest_api(config["Name"])
     if not rest_api:
-        rest_api = apigw_client.client.create_rest_api(name=function_name)
+        rest_api = apigw_client.client.create_rest_api(name=config["Name"])
 
     rest_api_id = rest_api.get("id")
 
