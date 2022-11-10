@@ -1,3 +1,4 @@
+import subprocess
 import sys
 import typing
 
@@ -196,6 +197,66 @@ def apigw(template: str, region: str):
     print(
         f"Url: http://localhost:4566/restapis/{rest_api_id}/local/_user_request_/health"
     )
+
+
+@cli.command(
+    "forward",
+    help=("Creates an http endpoint to forward requests to rest-api"),
+)
+@click.option("--region", required=True, help="The AWS region")
+@click.option(
+    "--template",
+    "-t",
+    required=True,
+    type=click.Path(exists=True),
+    help="The path of the lambda template",
+)
+@click.option(
+    "--net",
+    required=False,
+    help="The docker network to use for the apiproxy container",
+)
+def forward_rest_api(template: str, region: str, net: str):
+    config = LambdaTemplateConfig.load(template)
+
+    apigw_client = ApiGatewayClient(region)
+
+    rest_api = apigw_client.get_rest_api(config["Name"])
+    if not rest_api:
+        print("Could not find valid rest api")
+        sys.exit(1)
+
+    rest_api_id = rest_api.get("id")
+    apigw_path = f"/restapis/{rest_api_id}/local/_user_request_/"
+
+    cmd = [
+        "docker",
+        "run",
+        "--rm",
+        "-d",
+        "--net",
+        net or "default",
+        "--name",
+        "apiproxy",
+        "-p",
+        "8889:8889",
+        "-p",
+        "8999:8999",
+        "mitmproxy/mitmproxy",
+        "mitmweb",
+        "--web-host",
+        "0.0.0.0",
+        "--web-port",
+        "8999",
+        "--map-remote",
+        f"|/rest/|{apigw_path}",
+        "--mode",
+        "reverse:http://localstack:4566/",
+        "--listen-port",
+        "8889",
+        "--ssl-insecure",
+    ]
+    subprocess.run(cmd)
 
 
 if __name__ == "__main__":
