@@ -1,13 +1,30 @@
-import subprocess
+import re
 import sys
 import typing
 
 import boto3
 import click
+import docker
 import yaml
 
 DEFAULT_ENCODING = "UTF-8"
 DEFAULT_LAMBDA_ROLE = "arn:aws:iam::000000000000:role/lambda-role"
+DEFAULT_PROXY_CONTAINER_NAME = "apiproxy"
+
+
+def exact_match(field: str, value: str):
+    def matcher(elem) -> bool:
+        return getattr(elem, field) == value
+
+    return matcher
+
+
+def re_match(field: str, pattern: str):
+    def matcher(elem) -> bool:
+        result = re.match(pattern, getattr(elem, field))
+        return bool(result)
+
+    return matcher
 
 
 class LambdaTemplateResource(typing.TypedDict):
@@ -216,7 +233,12 @@ def apigw(template: str, region: str):
     required=False,
     help="The docker network to use for the apiproxy container",
 )
-def forward_rest_api(template: str, region: str, net: str):
+@click.option(
+    "--net-regex",
+    required=False,
+    help="Regex pattern to match the name of the container network",
+)
+def forward_rest_api(template: str, region: str, net: str, net_regex: str):
     config = LambdaTemplateConfig.load(template)
 
     apigw_client = ApiGatewayClient(region)
@@ -229,20 +251,40 @@ def forward_rest_api(template: str, region: str, net: str):
     rest_api_id = rest_api.get("id")
     apigw_path = f"/restapis/{rest_api_id}/local/_user_request_/"
 
+    do_client = docker.DockerClient(base_url="unix://var/run/docker.sock")
+
+    networks = do_client.networks.list()
+    network = None
+
+    matcher = exact_match("name", "default")
+    if net:
+        matcher = exact_match("name", net)
+    elif net_regex:
+        matcher = re_match("name", net_regex)
+
+    matching_networks = list(filter(matcher, networks))
+    if len(matching_networks) == 0:
+        print(f"No networks matching [{net or net_regex}] found.")
+        sys.exit(1)
+    if len(matching_networks) > 1:
+        print(f"More than one matching network: [{matching_networks}]")
+        sys.exit(1)
+
+    network = matching_networks[0]
+
+    try:
+        proxy_container = do_client.containers.get(
+            DEFAULT_PROXY_CONTAINER_NAME
+        )
+
+        print("Removing existing api proxy container")
+        proxy_container.stop()
+        proxy_container.remove()
+    except docker.errors.APIError:
+        pass
+
+    print(f"Running apiproxy container in network {network.name}")
     cmd = [
-        "docker",
-        "run",
-        "--rm",
-        "-d",
-        "--net",
-        net or "default",
-        "--name",
-        "apiproxy",
-        "-p",
-        "8889:8889",
-        "-p",
-        "8999:8999",
-        "mitmproxy/mitmproxy",
         "mitmweb",
         "--web-host",
         "0.0.0.0",
@@ -256,7 +298,18 @@ def forward_rest_api(template: str, region: str, net: str):
         "8889",
         "--ssl-insecure",
     ]
-    subprocess.run(cmd)
+    do_client.containers.run(
+        image="mitmproxy/mitmproxy",
+        name=DEFAULT_PROXY_CONTAINER_NAME,
+        auto_remove=False,
+        ports={
+            "8889/tcp": 8889,
+            "8999/tcp": 8999,
+        },
+        network=network.name,
+        command=cmd,
+        detach=True,
+    )
 
 
 if __name__ == "__main__":

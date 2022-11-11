@@ -9,6 +9,7 @@ setup(
         "click",
         "boto3",
         "pyyaml",
+        "docker",
     ],
     entry_points={
         "console_scripts": [
